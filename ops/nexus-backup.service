@@ -1,0 +1,8 @@
+[Unit]
+Description=NEXUS database and source file backup
+After=docker.service
+Requires=docker.service
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/nexus
+ExecStart=/usr/bin/python3 /opt/nexus/ops/backup.py --dest /mnt/nexus-offsite/backups --retain 14

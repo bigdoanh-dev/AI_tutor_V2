@@ -17,7 +17,7 @@ import {
 import { reviewItems } from "../lib/learning";
 import { Title, Empty, Meter, Heading } from "./ui";
 export function Practice({ topic }) {
-  const { state, startQuiz, resumeQuiz, go } = useWorkspace();
+  const { state, startQuiz, resumeQuiz, abandon, go } = useWorkspace();
   const [mode, setMode] = useState("adaptive");
   const [selected, setSelected] = useState(topicById[topic] ? topic : "");
   const [count, setCount] = useState(5);
@@ -33,11 +33,23 @@ export function Practice({ topic }) {
         <div className="notice">
           <strong>Bạn có một bài đang làm.</strong>
           <p>
-            Tiếp tục để giữ các câu đã chọn. Bắt đầu bài mới sẽ thay bài đang
-            làm.
+            Tiếp tục để giữ các câu đã chọn, hoặc bỏ bài trước khi tạo bài mới.
           </p>
           <button className="secondary" onClick={resumeQuiz}>
             Tiếp tục bài đang làm
+          </button>
+          <button
+            className="text-link"
+            onClick={() => {
+              if (
+                window.confirm(
+                  "Bỏ bài đang làm? Bài này sẽ không được tính điểm.",
+                )
+              )
+                abandon();
+            }}
+          >
+            Bỏ bài đang làm
           </button>
         </div>
       )}
@@ -90,7 +102,7 @@ export function Practice({ topic }) {
           value={Math.min(count, available)}
           onChange={(e) => setCount(Number(e.target.value))}
         >
-          {[5, 10]
+          {[...new Set([Math.min(5, available), 10])]
             .filter((n) => n <= available)
             .map((n) => (
               <option key={n} value={n}>
@@ -100,8 +112,8 @@ export function Practice({ topic }) {
         </select>
       </label>
       <p className="fine">
-        Ngân hàng mẫu có {available} câu phù hợp. Kết quả chỉ hiện sau khi nộp;
-        bài đang làm được lưu để tiếp tục.
+        Ngân hàng có {available} câu phù hợp. Kết quả chỉ hiện sau khi nộp; bài
+        đang làm được lưu để tiếp tục.
       </p>
       <button
         className="primary full"
@@ -238,7 +250,7 @@ export function Quiz() {
 }
 export function Explanation({ record }) {
   const { go, askTutor } = useWorkspace();
-  const q = questionById[record.questionId];
+  const q = record.question;
   if (!q) return null;
   return (
     <article className="review">
@@ -266,7 +278,7 @@ export function Explanation({ record }) {
         </button>
         <button
           className="secondary"
-          onClick={() => askTutor(q.id, record.selected)}
+          onClick={() => askTutor(q.id, record.sessionId)}
         >
           <MessageCircle size={14} /> Hỏi gia sư
         </button>
@@ -314,7 +326,10 @@ export function Result({ id }) {
       </div>
       <Heading title="Phân tích từng câu" />
       {session.answers.map((a) => (
-        <Explanation record={a} key={a.questionId} />
+        <Explanation
+          record={{ ...a, sessionId: session.id }}
+          key={a.questionId}
+        />
       ))}
     </>
   );

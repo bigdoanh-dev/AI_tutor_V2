@@ -6,49 +6,55 @@ import {
   BarChart3,
   BookOpen,
   ShieldCheck,
-  ChevronDown,
   Info,
+  Bell,
 } from "lucide-react";
 import { useWorkspace } from "../lib/context";
-import { downloadCalendar, exportFile } from "../lib/storage";
-import { dayKey } from "../lib/learning";
-import { Title, Panel, Heading } from "./ui";
+import { Title, Heading, Panel } from "./ui";
+import { api } from "../lib/api";
 export function Schedule() {
-  const { state, change, notify, go, track } = useWorkspace();
-  const [days, setDays] = useState(state.days);
-  const [time, setTime] = useState(state.reminder);
-  const [goal, setGoal] = useState(state.weekGoal);
-  const [today] = useState(() => dayKey());
-  const codes = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
-  const upcoming = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(today + "T00:00:00Z");
-    d.setUTCDate(d.getUTCDate() + i);
-    const key = dayKey(d);
-    return { key, weekday: codes[new Date(key + "T00:00:00Z").getUTCDay()] };
-  }).filter((d) => state.days.includes(d.weekday));
+  const { state, savePlan, run, notify } = useWorkspace();
+  const [days, setDays] = useState(state.days),
+    [time, setTime] = useState(state.reminder),
+    [goal, setGoal] = useState(state.weekGoal);
+  const [enabled, setEnabled] = useState(state.plan.enabled),
+    [email, setEmail] = useState(state.plan.email),
+    [suggestion, setSuggestion] = useState(null);
   const save = (e) => {
     e.preventDefault();
-    change((s) => ({ ...s, days, reminder: time, weekGoal: goal }));
-    track("schedule_saved", { days, reminder: time, goal });
-    notify("Đã lưu lịch ôn tập.");
+    savePlan({ days, reminder: time, weekGoal: goal, enabled, email });
   };
+  const suggest = () =>
+    run(async () => {
+      const p = await api("/study-plan/suggestion");
+      setDays(p.days);
+      setTime(p.reminder);
+      setGoal(p.weekGoal);
+      setEnabled(p.enabled);
+      setEmail(p.email);
+      setSuggestion(p);
+      notify("Đã điền lịch gợi ý. Bấm lưu để áp dụng.");
+    });
   return (
     <>
       <Title title="Lịch ôn tập" back="home">
-        Thời gian theo múi giờ Việt Nam (GMT+7).
+        Thời gian Việt Nam (GMT+7).
       </Title>
       <form className="panel" onSubmit={save}>
         <h2>Thiết lập nhịp học</h2>
-        <p className="muted">Gợi ý ban đầu: 15 phút, 3 ngày mỗi tuần.</p>
+        <p>15 phút mỗi buổi. Lịch gợi ý: 3 ngày mỗi tuần.</p>
+        <button type="button" className="secondary" onClick={suggest}>
+          Dùng lịch gợi ý
+        </button>
         <fieldset className="choice-group">
           <legend>Ngày ôn trong tuần</legend>
           <div className="days">
             {["T2", "T3", "T4", "T5", "T6", "T7", "CN"].map((d) => (
               <button
                 type="button"
+                key={d}
                 aria-pressed={days.includes(d)}
                 className={days.includes(d) ? "chosen" : ""}
-                key={d}
                 onClick={() =>
                   setDays(
                     days.includes(d)
@@ -66,8 +72,8 @@ export function Schedule() {
           Giờ ôn
           <input
             type="time"
-            required
             value={time}
+            required
             onChange={(e) => setTime(e.target.value)}
           />
         </label>
@@ -84,101 +90,96 @@ export function Schedule() {
             ))}
           </select>
         </label>
-        <button className="primary full">Lưu lịch học</button>
+        <label className="check-row">
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={(e) => setEnabled(e.target.checked)}
+          />
+          Bật nhắc ôn trong app
+        </label>
+        <label className="check-row">
+          <input
+            type="checkbox"
+            checked={email}
+            onChange={(e) => setEmail(e.target.checked)}
+          />
+          Gửi thêm email nhắc ôn
+        </label>
+        <button className="primary">Lưu lịch ôn tập</button>
       </form>
-      <Heading title="7 ngày sắp tới" />
-      {upcoming.length ? (
-        upcoming.map((d) => (
-          <div className="schedule-row" key={d.key}>
-            <CalendarDays size={18} />
-            <span>
-              <strong>
-                {d.weekday} · {d.key.split("-").reverse().join("/")}
-              </strong>
-              <small>{state.reminder} · 15 phút ôn tập</small>
-            </span>
-            <button className="text-link" onClick={() => go("practice")}>
-              Học ngay
-            </button>
-          </div>
-        ))
-      ) : (
-        <p className="muted">
-          Chọn ngày rồi lưu lịch để hiện các buổi ôn sắp tới.
-        </p>
+      {suggestion && (
+        <Panel title="Nội dung nên ôn">
+          {suggestion.recommendations.slice(0, 3).map((r) => (
+            <p key={r.materialId}>
+              <strong>{r.title}</strong>
+              <br />
+              {r.reason}
+            </p>
+          ))}
+        </Panel>
       )}
-      <Panel title="Nhắc học qua lịch điện thoại">
+      <Panel title="Lịch đã lưu">
         <p>
-          Tải lịch 7 ngày, mở tệp bằng ứng dụng Lịch và thêm các buổi ôn. Mỗi
-          buổi có nhắc trước 10 phút. Bạn cần chấp nhận thêm lịch và bật nhắc
-          trong ứng dụng Lịch.
+          {state.days.join(" · ") || "Chưa chọn ngày"} · {state.reminder} · 15
+          phút
         </p>
-        <button
-          className="secondary"
-          disabled={!upcoming.length}
-          onClick={() => {
-            downloadCalendar(state);
-            notify("Đã tải tệp lịch. Mở tệp để thêm vào ứng dụng Lịch.");
-          }}
-        >
+        <p>
+          {state.plan.enabled ? "Đã bật nhắc ôn" : "Chưa bật nhắc ôn"}
+          {state.plan.email && " · Có email"}
+        </p>
+        <a className="secondary" href="/api/v1/study-plan/calendar.ics">
           <Download size={16} /> Tải lịch (.ics)
-        </button>
-        <p className="fine">NEXUS chưa gửi thông báo nền khi ứng dụng đóng.</p>
+        </a>
+        <p className="fine">
+          Lịch tải về cần được nhập vào ứng dụng Lịch. Email được gửi khi đã bật
+          nhắc ôn và chọn nhận email.
+        </p>
       </Panel>
     </>
   );
 }
 export function Profile() {
-  const { state, change, go, notify } = useWorkspace();
-  const [name, setName] = useState(state.name === "bạn" ? "" : state.name);
-  const [editing, setEditing] = useState(false);
-  const displayName = state.name === "bạn" ? "Học viên NEXUS" : state.name;
-  const initials =
-    state.name === "bạn"
-      ? "N"
-      : state.name
-          .trim()
-          .split(/\s+/)
-          .slice(-2)
-          .map((part) => part[0])
-          .join("")
-          .toUpperCase();
+  const { state, change, go, notify, logout, user, catalog } = useWorkspace();
+  const [name, setName] = useState(state.name),
+    [editing, setEditing] = useState(false);
+  const initials = state.name
+    .trim()
+    .split(/\s+/)
+    .slice(-2)
+    .map((p) => p[0])
+    .join("")
+    .toUpperCase();
+  async function save(e) {
+    e.preventDefault();
+    if (await change((s) => ({ ...s, name: name.trim() }))) {
+      setEditing(false);
+      notify("Đã cập nhật hồ sơ.");
+    }
+  }
   return (
     <>
-      <Title title="Cá nhân">Hồ sơ và thiết lập học tập của bạn.</Title>
-      <section className="profile-summary" aria-label="Thông tin học viên">
+      <Title title="Cá nhân">Hồ sơ và thiết lập học tập.</Title>
+      <section className="profile-summary">
         <div className="profile-identity">
           <span className="profile-avatar">{initials}</span>
           <div className="grow">
-            <h2>{displayName}</h2>
-            <p>Sinh viên · Công nghệ thông tin</p>
+            <h2>{state.name}</h2>
+            <p>{user.email}</p>
           </div>
-          <button
-            className="text-link"
-            aria-expanded={editing}
-            onClick={() => setEditing(!editing)}
-          >
+          <button className="text-link" onClick={() => setEditing(!editing)}>
             {editing ? "Đóng" : "Chỉnh sửa"}
           </button>
         </div>
         {editing && (
-          <form
-            className="profile-edit"
-            onSubmit={(e) => {
-              e.preventDefault();
-              change((s) => ({ ...s, name: name.trim() || "bạn" }));
-              setEditing(false);
-              notify("Đã cập nhật tên hiển thị.");
-            }}
-          >
+          <form className="profile-edit" onSubmit={save}>
             <label className="field">
               Tên hiển thị
               <input
-                autoComplete="nickname"
                 value={name}
+                required
+                maxLength={100}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Tên bạn muốn dùng"
-                maxLength={40}
               />
             </label>
             <button className="primary">Lưu hồ sơ</button>
@@ -190,145 +191,123 @@ export function Profile() {
             <span>Bài đã hoàn thành</span>
           </div>
           <div>
-            <strong>{state.read.length}/4</strong>
+            <strong>
+              {state.read.length}/{catalog.topics.length}
+            </strong>
             <span>Học liệu đã đọc</span>
           </div>
         </div>
-        <p className="profile-local">Hồ sơ lưu trên thiết bị này</p>
+        <p className="profile-local">
+          Dữ liệu được lưu theo tài khoản trên máy chủ.
+        </p>
       </section>
       <Heading title="Học tập" />
       <div className="settings-group">
-        <button className="settings-row" onClick={() => go("progress")}>
-          <BarChart3 size={20} />
-          <span>
-            <strong>Tiến độ học tập</strong>
-            <small>Kết quả, biểu đồ và lịch sử bài làm</small>
-          </span>
-          <ArrowRight size={17} />
-        </button>
-        <button className="settings-row" onClick={() => go("path")}>
-          <BookOpen size={20} />
-          <span>
-            <strong>Lộ trình cá nhân</strong>
-            <small>Chủ đề ưu tiên và bước học tiếp theo</small>
-          </span>
-          <ArrowRight size={17} />
-        </button>
-        <button className="settings-row" onClick={() => go("schedule")}>
-          <CalendarDays size={20} />
-          <span>
-            <strong>Lịch và mục tiêu học</strong>
-            <small>
-              {state.weekGoal} ngày mỗi tuần
-              {state.days.length ? " · " + state.reminder : ""}
-            </small>
-          </span>
-          <ArrowRight size={17} />
-        </button>
+        {[
+          [
+            "progress",
+            BarChart3,
+            "Tiến độ học tập",
+            "Kết quả, biểu đồ và lịch sử",
+          ],
+          ["path", BookOpen, "Lộ trình cá nhân", "Chủ đề ưu tiên và học liệu"],
+          [
+            "schedule",
+            CalendarDays,
+            "Lịch và mục tiêu học",
+            `${state.weekGoal} ngày mỗi tuần`,
+          ],
+          [
+            "notifications",
+            Bell,
+            "Nhắc ôn tập",
+            `${state.notifications.filter((n) => !n.read_at).length} thông báo chưa đọc`,
+          ],
+        ].map(([page, Icon, title, detail]) => (
+          <button key={page} className="settings-row" onClick={() => go(page)}>
+            <Icon size={20} />
+            <span>
+              <strong>{title}</strong>
+              <small>{detail}</small>
+            </span>
+            <ArrowRight size={17} />
+          </button>
+        ))}
       </div>
       <Heading title="Dữ liệu & ứng dụng" />
       <details className="settings-details">
         <summary>
           <ShieldCheck size={20} />
-          <span>
-            <strong>Quyền riêng tư & dữ liệu</strong>
-            <small>Bạn quyết định cách sử dụng dữ liệu học tập</small>
-          </span>
-          <ChevronDown size={17} />
+          <span>Quyền riêng tư & dữ liệu</span>
         </summary>
         <div className="settings-body">
           <p>
-            Bài làm và hội thoại chỉ lưu trên thiết bị, chưa đồng bộ tài khoản.
-            Bạn có thể tải một bản dữ liệu để tự xem hoặc chủ động cung cấp cho
-            nhóm nghiên cứu.
+            Bài làm và hội thoại được lưu theo tài khoản. Bạn có thể xuất dữ
+            liệu học tập của mình.
           </p>
           <label className="check-row">
             <input
               type="checkbox"
               checked={state.logging}
-              onChange={(e) => {
-                const enabled = e.target.checked;
-                change((s) => ({ ...s, logging: enabled }));
-                notify(
-                  enabled
-                    ? "Đã bật nhật ký học tập trên thiết bị."
-                    : "Đã tắt ghi nhật ký mới.",
-                );
+              onChange={async (e) => {
+                const value = e.target.checked;
+                if (await change((s) => ({ ...s, logging: value })))
+                  notify(
+                    value
+                      ? "Đã bật nhật ký thao tác."
+                      : "Đã tắt nhật ký thao tác mới.",
+                  );
               }}
-            />{" "}
+            />
             Ghi thêm nhật ký thao tác học tập
           </label>
           <p className="fine">
-            Ghi câu đã mở/chọn, thời điểm và học liệu đã xem bằng mã ngẫu nhiên.
-            Tắt nhật ký vẫn giữ bài làm để tính tiến độ. Không tự gửi dữ liệu
-            đi.
+            Tắt tùy chọn vẫn giữ bài làm, dữ liệu cần để vận hành và kết quả
+            học. Nhật ký thao tác không chứa nội dung hội thoại.
           </p>
           <div className="actions">
-            <button className="secondary" onClick={() => exportFile(state)}>
+            <a className="secondary" href="/api/v1/export">
               Tải dữ liệu JSON
-            </button>
-            <button
-              className="secondary"
-              onClick={() => exportFile(state, "csv")}
-            >
+            </a>
+            <a className="secondary" href="/api/v1/export?format=csv">
               Tải bài làm CSV
-            </button>
+            </a>
           </div>
-          <small className="fine">
-            {state.sessions.length} bài luyện · {state.events.length} sự kiện đã
-            lưu
-          </small>
         </div>
       </details>
       <details className="settings-details">
         <summary>
           <BookOpen size={20} />
-          <span>
-            <strong>Học liệu & nguồn tham khảo</strong>
-            <small>Thông tin nội dung và quyền sử dụng</small>
-          </span>
-          <ChevronDown size={17} />
+          <span>Học liệu & nguồn</span>
         </summary>
         <div className="settings-body">
           <p>
-            24 câu hỏi và 4 học liệu CNTT được biên soạn cho bản demo, chưa nhập
-            slide hoặc bài tập của giảng viên. Học liệu thật cần ghi tác giả,
-            nguồn và quyền sử dụng.
+            {catalog.questions.length} câu hỏi · {catalog.topics.length} học
+            liệu · phiên bản {catalog.version}.
           </p>
-          <p>
-            Luồng học viên tham khảo Docprep. Nội dung CNTT và mã của phiên bản
-            này được triển khai riêng.
-          </p>
-          <a
-            className="text-link"
-            href="https://github.com/bigdoanh-dev/Docprep"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Xem repo tham khảo
-          </a>
+          {catalog.demo && (
+            <p>
+              Đây là nội dung demo. Chưa thay thế slide hoặc bài tập đã được
+              giảng viên duyệt.
+            </p>
+          )}
         </div>
       </details>
       <details className="settings-details">
         <summary>
           <Info size={20} />
-          <span>
-            <strong>Về NEXUS</strong>
-            <small>Phiên bản học viên · thử nghiệm</small>
-          </span>
-          <ChevronDown size={17} />
+          <span>Về NEXUS</span>
         </summary>
         <div className="settings-body">
           <p>
-            Ôn tập CNTT bằng bài luyện thích ứng và học liệu theo chủ đề. Gia sư
-            hiện tra nội dung mẫu trên thiết bị, chưa kết nối AI trực tuyến.
-          </p>
-          <p className="fine">
-            Xóa dữ liệu trình duyệt có thể làm mất tiến độ. Bạn có thể tải bản
-            dữ liệu trong mục Quyền riêng tư & dữ liệu.
+            Ôn tập theo kết quả gần đây, đề tuần cố định và Gia sư dựa trên học
+            liệu. Phần quản trị thực nghiệm sẽ triển khai sau.
           </p>
         </div>
       </details>
+      <button className="secondary" onClick={logout}>
+        Đăng xuất
+      </button>
     </>
   );
 }

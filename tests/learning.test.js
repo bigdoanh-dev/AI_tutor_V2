@@ -7,9 +7,9 @@ import {
   rhythm,
   makeSession,
   dayKey,
-} from "../src/lib/learning.js";
-import { defaults, loadWorkspace, event } from "../src/lib/storage.js";
-import { questions, topics } from "../src/data/catalog.js";
+} from "../server/data/legacy-learning.js";
+import { defaults, loadWorkspace, event } from "../server/data/legacy-storage.js";
+import { questions, topics } from "../server/data/catalog.js";
 const draft = (overrides = {}) => ({
   id: "session-test",
   mode: "adaptive",
@@ -151,7 +151,7 @@ test("old stored learning results migrate without erasing user progress", () => 
   assert.deepEqual(loaded.saved, ["ds"]);
 });
 test("CSV columns stay aligned for legacy and newly recorded sessions", async () => {
-  const { exportBody } = await import("../src/lib/storage.js");
+  const { exportBody } = await import("../server/data/legacy-storage.js");
   const state = defaults();
   state.sessions = [
     session([{ questionId: 1, topic: "ds", selected: 0, correct: false }]),
@@ -172,7 +172,7 @@ test("CSV columns stay aligned for legacy and newly recorded sessions", async ()
   assert.ok(lines[0].includes("flagged"));
 });
 test("calendar export uses Vietnam study time and adds a reminder", async () => {
-  const { calendarBody } = await import("../src/lib/storage.js");
+  const { calendarBody } = await import("../server/data/legacy-storage.js");
   const text = calendarBody(
     { ...defaults(), days: ["T6"], reminder: "19:00" },
     new Date("2026-10-30T01:00:00Z"),
@@ -183,7 +183,7 @@ test("calendar export uses Vietnam study time and adds a reminder", async () => 
 });
 
 test("radar distinguishes missing observations from 0% and aggregates three difficulty levels", async () => {
-  const { radarStats } = await import("../src/lib/learning.js");
+  const { radarStats } = await import("../server/data/legacy-learning.js");
   const data = [
     session([
       { topic: "ds", level: 1, correct: false },
@@ -205,7 +205,7 @@ test("radar distinguishes missing observations from 0% and aggregates three diff
 });
 
 test("eight skill axes cover the complete bank without fabricating unobserved scores", async () => {
-  const { radarStats, skillGroups } = await import("../src/lib/learning.js");
+  const { radarStats, skillGroups } = await import("../server/data/legacy-learning.js");
   const assigned = skillGroups.flatMap((g) => g.ids);
   assert.equal(new Set(assigned).size, questions.length);
   assert.equal(assigned.length, questions.length);

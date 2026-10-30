@@ -30,9 +30,8 @@ export function Home() {
   const { state, go, resumeQuiz } = useWorkspace();
   const answers = allAnswers(state.sessions);
   const stats = topicStats(state.sessions);
-  const focus = [...stats].sort(
-    (a, b) => (a.total ? a.accuracy : 50) - (b.total ? b.accuracy : 50),
-  )[0];
+  const focus =
+    stats.find((t) => t.id === state.recommendations?.[0]?.topicId) || stats[0];
   const week = rhythm(state.sessions);
   return (
     <>
@@ -126,7 +125,7 @@ export function Home() {
               {state.read.includes(t.id)
                 ? "Đã đọc học liệu"
                 : `${t.minutes} phút đọc`}{" "}
-              · {t.seen}/6 câu đã gặp
+              · {t.seen}/{t.totalQuestions} câu đã gặp
             </small>
             <Meter value={t.coverage} label={`Độ bao phủ ${t.name}`} />
           </span>
@@ -139,9 +138,10 @@ export function Home() {
 export function Path() {
   const { state, go } = useWorkspace();
   const stats = topicStats(state.sessions);
-  const ordered = [...stats].sort(
-    (a, b) => (a.total ? a.accuracy : 50) - (b.total ? b.accuracy : 50),
-  );
+  const ordered =
+    state.recommendations
+      ?.map((r) => stats.find((t) => t.id === r.topicId))
+      .filter(Boolean) || stats;
   const wrong = reviewItems(state.sessions);
   return (
     <>
@@ -177,7 +177,7 @@ export function Path() {
             </div>
             <p>
               {t.total
-                ? `${t.accuracy}% đúng gần đây · ${t.seen}/6 câu đã gặp`
+                ? `${t.accuracy}% đúng gần đây · ${t.seen}/{t.totalQuestions} câu đã gặp`
                 : "Bắt đầu ở mức cơ bản, tăng dần khi trả lời tốt."}
             </p>
             <Meter value={t.coverage} label={t.name} />
@@ -200,7 +200,7 @@ export function Path() {
         <ArrowRight size={16} />
       </button>
       <p className="fine">
-        Đây là gợi ý bằng quy tắc thích ứng trên thiết bị, chưa phải chẩn đoán
+        Đây là gợi ý bằng quy tắc thích ứng từ kết quả học, chưa phải chẩn đoán
         năng lực hay mô hình AI trực tuyến.
       </p>
     </>
@@ -326,17 +326,24 @@ export function Lesson({ id }) {
         <div className="source">
           <strong>Nguồn & quyền sử dụng</strong>
           <p>
-            Học liệu minh họa NEXUS, biên soạn cho bản demo CNTT. Chưa phải
-            slide của giảng viên hoặc học liệu được cấp phép từ bên thứ ba.
+            {t.source?.title} · trang {t.source?.page}
           </p>
+          <a
+            className="text-link"
+            href={`/api/v1/materials/${id}/source`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Xem tài liệu nguồn
+          </a>
         </div>
       </article>
       <button
         className="secondary full"
-        onClick={() => {
+        onClick={async () => {
           if (!state.read.includes(id)) {
-            change((s) => ({ ...s, read: [...s.read, id] }));
-            track("resource_completed", { topic: id });
+            if (await change((s) => ({ ...s, read: [...s.read, id] })))
+              track("resource_viewed", { topic: id, completed: true });
           }
         }}
         disabled={state.read.includes(id)}
@@ -363,7 +370,7 @@ export function Progress() {
   return (
     <>
       <Title title="Tiến độ học tập">
-        Số liệu từ bài luyện đã nộp trên thiết bị này.
+        Số liệu từ bài luyện đã nộp trong tài khoản của bạn.
       </Title>
       <div className="tabs">
         {[
@@ -430,7 +437,7 @@ export function Progress() {
                   {t.total
                     ? `${t.accuracy}% đúng / ${t.recent} lượt gần nhất`
                     : "Chưa có dữ liệu"}{" "}
-                  · đã gặp {t.seen}/6 câu
+                  · đã gặp {t.seen}/{t.totalQuestions} câu
                 </small>
                 <Meter value={t.coverage} label={`Độ bao phủ ${t.name}`} />
               </span>

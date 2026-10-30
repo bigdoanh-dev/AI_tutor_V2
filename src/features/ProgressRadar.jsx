@@ -47,7 +47,7 @@ export function ProgressRadar({ sessions }) {
         <title id="radar-svg-title">
           Biểu đồ radar tỷ lệ đúng{" "}
           {dimension === "skill"
-            ? "theo 8 nhóm kỹ năng"
+            ? "theo nhóm kỹ năng"
             : dimension === "topic"
               ? "theo chủ đề"
               : "theo độ khó"}
@@ -161,10 +161,10 @@ export function ProgressRadar({ sessions }) {
       )}
       <p className="fine radar-note">
         {dimension === "skill"
-          ? "8 nhóm kỹ năng được phân theo nội dung câu hỏi."
+          ? `${axes.length} nhóm kỹ năng được phân theo nội dung câu hỏi.`
           : dimension === "level"
             ? "Ngân hàng hiện có 3 mức độ khó."
-            : "Ngân hàng hiện có 4 chủ đề."}{" "}
+            : `${axes.length} chủ đề trong ngân hàng.`}{" "}
         Trục chưa có dữ liệu không được tính là 0%. Vùng kết quả xuất hiện khi
         tất cả trục đều có bài làm.
       </p>

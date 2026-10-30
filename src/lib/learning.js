@@ -1,4 +1,4 @@
-import { questions, questionById, topics } from "../data/catalog.js";
+import { questions, topics } from "../data/catalog.js";
 export const dayKey = (value = new Date()) =>
   new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Ho_Chi_Minh",
@@ -17,7 +17,12 @@ export function topicStats(sessions) {
     const a = answers.filter((a) => a.topic === t.id);
     const recent = a.slice(-12);
     const correct = recent.filter((a) => a.correct).length;
-    const seen = new Set(a.map((a) => a.questionId));
+    const published = new Set(
+      questions.filter((q) => q.topic === t.id).map((q) => q.id),
+    );
+    const seen = new Set(
+      a.filter((a) => published.has(a.questionId)).map((a) => a.questionId),
+    );
     return {
       ...t,
       total: a.length,
@@ -29,6 +34,7 @@ export function topicStats(sessions) {
         questions.filter((q) => q.topic === t.id).length,
       ),
       seen: seen.size,
+      totalQuestions: published.size,
     };
   });
 }
@@ -38,47 +44,6 @@ export function reviewItems(sessions) {
   return [...latest.values()]
     .filter((a) => !a.correct)
     .sort((a, b) => new Date(b.at) - new Date(a.at));
-}
-export function nextQuestion(draft, sessions) {
-  const candidates = questions.filter(
-    (q) =>
-      !draft.ids.includes(q.id) &&
-      (!draft.topic || q.topic === draft.topic) &&
-      (!draft.pool || draft.pool.includes(q.id)),
-  );
-  if (!candidates.length) return null;
-  if (draft.mode === "fixed")
-    return candidates.sort(
-      (a, b) =>
-        (draft.fixedOrder?.indexOf(a.id) ?? a.id) -
-        (draft.fixedOrder?.indexOf(b.id) ?? b.id),
-    )[0];
-  const past = allAnswers(sessions);
-  // Include previous answers in the active quiz to adjust the next difficulty without revealing results early.
-  const provisional = draft.ids
-    .filter((id) => draft.answers[id] !== undefined)
-    .map((id) => ({
-      topic: questionById[id].topic,
-      questionId: id,
-      correct: draft.answers[id] === questionById[id].answer,
-    }));
-  const evidence = [...past, ...provisional];
-  const latest = new Map(past.map((a) => [a.questionId, a]));
-  const score = (q) => {
-    const recent = evidence.filter((a) => a.topic === q.topic).slice(-6);
-    const rate = recent.length
-      ? recent.filter((a) => a.correct).length / recent.length
-      : 0.5;
-    const target =
-      recent.length < 2 ? 1 : rate >= 0.8 ? 3 : rate >= 0.5 ? 2 : 1;
-    const weakness = recent.length ? 1 - rate : 0.65;
-    return (
-      weakness * 4 -
-      Math.abs(q.level - target) * 1.3 +
-      (latest.has(q.id) ? (latest.get(q.id).correct ? -0.6 : 0.2) : 0.4)
-    );
-  };
-  return candidates.sort((a, b) => score(b) - score(a) || a.id - b.id)[0];
 }
 export function rhythm(sessions, now = new Date()) {
   const days = Array.from({ length: 7 }, (_, i) => {
@@ -102,29 +67,7 @@ export function rhythm(sessions, now = new Date()) {
     minutes: Math.round(days.reduce((n, d) => n + d.seconds, 0) / 60),
   };
 }
-export function makeSession(draft) {
-  return {
-    id: draft.id,
-    at: new Date().toISOString(),
-    mode: draft.mode,
-    topic: draft.topic,
-    elapsedMs: draft.elapsedMs || 0,
-    answers: draft.ids.map((id) => {
-      const q = questionById[id];
-      return {
-        questionId: id,
-        topic: q.topic,
-        level: q.level,
-        selected: draft.answers[id],
-        flagged: (draft.flagged || []).includes(id),
-        correct: draft.answers[id] === q.answer,
-        responseMs: draft.responseMs?.[id] || 0,
-      };
-    }),
-  };
-}
-
-export const skillGroups = [
+const knownSkillGroups = [
   { id: "linear", name: "Ngăn xếp & hàng đợi", ids: [1, 6, 7, 10] },
   { id: "trees", name: "Cây & danh sách liên kết", ids: [8, 9] },
   { id: "sql", name: "Truy vấn SQL", ids: [2, 11, 12, 13] },
@@ -134,12 +77,20 @@ export const skillGroups = [
   { id: "flow", name: "Vòng lặp", ids: [4, 21] },
   { id: "functions", name: "Biến & hàm", ids: [20, 22, 23, 24] },
 ];
+export function skillGroups() {
+  const ids = [...new Set(questions.flatMap((q) => q.skills || []))];
+  return ids.map((id) => ({
+    id,
+    name: knownSkillGroups.find((g) => g.id === id)?.name || id,
+    ids: questions.filter((q) => q.skills?.includes(id)).map((q) => q.id),
+  }));
+}
 // Null distinguishes an unobserved axis from a measured 0% success rate.
 export function radarStats(sessions, dimension = "topic") {
   const answers = allAnswers(sessions);
   const axes =
     dimension === "skill"
-      ? skillGroups.map((g, i) => ({ ...g, labels: [String(i + 1)] }))
+      ? skillGroups().map((g, i) => ({ ...g, labels: [String(i + 1)] }))
       : dimension === "level"
         ? [
             { id: 1, name: "Cơ bản", labels: ["Cơ bản"] },
@@ -154,7 +105,7 @@ export function radarStats(sessions, dimension = "topic") {
               db: ["Cơ sở", "dữ liệu"],
               algo: ["Giải thuật"],
               prog: ["Lập trình", "cơ bản"],
-            }[t.id],
+            }[t.id] || [t.name],
           }));
   return axes.map((axis) => {
     const records = answers.filter((a) =>

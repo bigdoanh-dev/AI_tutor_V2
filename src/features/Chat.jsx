@@ -1,92 +1,96 @@
 import { useState, useRef, useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { History, SquarePen, Send, MessageCircle } from "lucide-react";
 import { useWorkspace } from "../lib/context";
-import { uid } from "../lib/storage";
-import { questionById, topicById } from "../data/catalog";
-const nowIso = () => new Date().toISOString();
+import { api, chatStream } from "../lib/api";
 export function Chat() {
-  const { state, change, chatContext, setChatContext, go, track } =
-    useWorkspace();
-  const [text, setText] = useState("");
-  const [historyOpen, setHistory] = useState(false);
-  const [search, setSearch] = useState("");
-  const feed = useRef(null);
-  const active = state.chats.find((c) => c.id === state.activeChatId);
-  const messages = active?.messages || [];
+  const {
+    state,
+    user,
+    chatContext,
+    setChatContext,
+    setActiveChat,
+    refresh,
+    notify,
+  } = useWorkspace();
+  const [text, setText] = useState(""),
+    [historyOpen, setHistory] = useState(false),
+    [search, setSearch] = useState("");
+  const [sending, setSending] = useState(false),
+    [turn, setTurn] = useState(null);
+  const feed = useRef(null),
+    cache = useQueryClient(),
+    locked = useRef(false);
+  const activeId = state.activeChatId;
+  const query = useQuery({
+    queryKey: ["messages", user.id, activeId],
+    queryFn: () => api(`/conversations/${activeId}/messages`),
+    enabled: !!activeId,
+  });
+  const messages = query.data || [];
   useEffect(() => {
     feed.current?.scrollTo({
       top: feed.current.scrollHeight,
       behavior: "smooth",
     });
-  }, [messages.length]);
-  const send = (prompt = text) => {
-    if (!prompt.trim()) return;
-    const p = prompt.trim();
-    const q = chatContext && questionById[chatContext.questionId];
-    const normalized = p.toLocaleLowerCase("vi");
-    let source = null,
-      reply =
-        "Bản minh họa chưa xử lý được câu hỏi này. Mình có thể giải thích nội dung trong 4 học liệu, hoặc phân tích một câu từ trang kết quả. Thử hỏi về Stack/Queue, SQL, tìm kiếm nhị phân hoặc vòng lặp.";
-    if (q) {
-      source = q.topic;
-      reply = `Bạn đang hỏi về: ${q.stem}\n\nBạn chọn: ${q.options[chatContext.selected] ?? "Chưa chọn"}. Đáp án đúng: ${q.options[q.answer]}.\n\n${q.wrong?.[chatContext.selected] || ""} ${q.explanation}`;
-    } else {
-      const matches = [
-        [/stack|queue|ngăn xếp|hàng đợi|lifo|fifo|cây|liên kết/, "ds"],
-        [/sql|select|where|khóa|dữ liệu|join|having/, "db"],
-        [/nhị phân|big.?o|phức tạp|merge|bfs|giải thuật|thuật toán/, "algo"],
-        [/for|while|vòng lặp|biến|đệ quy|const|hàm/, "prog"],
-      ];
-      source = matches.find(([rx]) => rx.test(normalized))?.[1] || null;
-      if (source) {
-        const t = topicById[source];
-        reply = t.sections
-          .map(([heading, body]) => `${heading}\n${body}`)
-          .join("\n\n");
+  }, [messages.length, turn?.reply]);
+  async function send(prompt = text) {
+    if (!prompt.trim() || locked.current) return;
+    locked.current = true;
+    setSending(true);
+    setTurn({ text: prompt, reply: "" });
+    let id = activeId;
+    try {
+      if (!id) {
+        const conversation = await api("/conversations", {
+          method: "POST",
+          body: { title: prompt.slice(0, 100), context: chatContext },
+        });
+        id = conversation.id;
+        setActiveChat(id);
+        await refresh();
       }
+      await chatStream(id, prompt, (delta) =>
+        setTurn((t) => ({ ...t, reply: (t?.reply || "") + delta })),
+      );
+      await cache.invalidateQueries({ queryKey: ["messages", user.id, id] });
+      setText("");
+      setTurn(null);
+      setChatContext(null);
+    } catch (error) {
+      notify(error.message);
+      setTurn(null);
+    } finally {
+      locked.current = false;
+      setSending(false);
     }
-    const current = state.activeChatId || uid();
-    const next = {
-      id: current,
-      title: active?.title || p.slice(0, 55),
-      at: nowIso(),
-      messages: [
-        ...messages,
-        { role: "user", text: p },
-        { role: "assistant", text: reply, source },
-      ],
-    };
-    change((s) => ({
-      ...s,
-      activeChatId: current,
-      chats: [next, ...s.chats.filter((c) => c.id !== current)].slice(0, 30),
-    }));
-    track("tutor_question", { contextQuestionId: q?.id || null });
-    setText("");
+  }
+  const newChat = () => {
+    setActiveChat(null);
+    setChatContext(null);
+    setTurn(null);
+    setHistory(false);
   };
   return (
     <div className="chat-screen">
       <div className="chat-toolbar">
         <button
           className="icon-button"
+          disabled={sending}
           aria-label="Lịch sử trò chuyện"
-          aria-expanded={historyOpen}
           onClick={() => setHistory(!historyOpen)}
         >
           <History size={19} />
         </button>
         <div>
           <strong>Gia sư NEXUS</strong>
-          <small>Tra cứu học liệu mẫu</small>
+          <small>Giải thích dựa trên học liệu có nguồn</small>
         </div>
         <button
           className="icon-button"
+          disabled={sending}
           aria-label="Cuộc trò chuyện mới"
-          onClick={() => {
-            change((s) => ({ ...s, activeChatId: null }));
-            setChatContext(null);
-            setHistory(false);
-          }}
+          onClick={newChat}
         >
           <SquarePen size={19} />
         </button>
@@ -94,25 +98,17 @@ export function Chat() {
       {historyOpen ? (
         <aside className="chat-history">
           <h2>Lịch sử trò chuyện</h2>
-          <label className="search">
-            <span className="sr-only">Tìm cuộc trò chuyện</span>
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Tìm trong lịch sử"
-            />
+          <label className="field">
+            Tìm hội thoại
+            <input value={search} onChange={(e) => setSearch(e.target.value)} />
           </label>
           {state.chats
-            .filter((c) =>
-              c.title
-                .toLocaleLowerCase("vi")
-                .includes(search.toLocaleLowerCase("vi")),
-            )
+            .filter((c) => c.title.toLowerCase().includes(search.toLowerCase()))
             .map((c) => (
               <button
                 key={c.id}
                 onClick={() => {
-                  change((s) => ({ ...s, activeChatId: c.id }));
+                  setActiveChat(c.id);
                   setChatContext(null);
                   setHistory(false);
                 }}
@@ -120,7 +116,7 @@ export function Chat() {
                 {c.title}
               </button>
             ))}
-          {!state.chats.length && <p>Chưa có hội thoại nào.</p>}
+          {!state.chats.length && <p>Chưa có hội thoại.</p>}
           <button className="secondary" onClick={() => setHistory(false)}>
             Đóng lịch sử
           </button>
@@ -129,10 +125,10 @@ export function Chat() {
         <>
           {chatContext && (
             <div className="notice">
-              <strong>Đang hỏi về câu đã làm</strong>
-              <p>{questionById[chatContext.questionId]?.stem}</p>
+              Đang hỏi về câu đã nộp. Gia sư sẽ lấy kết quả từ máy chủ.
               <button
                 className="text-link"
+                disabled={sending}
                 onClick={() => setChatContext(null)}
               >
                 Hỏi chủ đề khác
@@ -145,7 +141,9 @@ export function Chat() {
             role="log"
             aria-label="Nội dung hội thoại"
           >
-            {!messages.length && (
+            {query.isLoading && <p>Đang tải hội thoại…</p>}
+            {query.error && <p role="alert">{query.error.message}</p>}
+            {!messages.length && !turn && (
               <div className="chat-intro">
                 <MessageCircle size={30} />
                 <h1>
@@ -153,7 +151,7 @@ export function Chat() {
                   <br />
                   điều gì hôm nay?
                 </h1>
-                <p>Chọn một gợi ý hoặc nhập câu hỏi.</p>
+                <p>Hỏi theo học liệu của môn học. Câu trả lời sẽ kèm nguồn.</p>
                 {(chatContext
                   ? ["Vì sao lựa chọn của tôi sai?"]
                   : [
@@ -172,25 +170,38 @@ export function Chat() {
                 ))}
               </div>
             )}
-            {messages.map((m, i) => (
-              <div className={"chat-message " + m.role} key={i}>
-                <small>
-                  {m.role === "user" ? "Bạn" : "Gia sư · bản minh họa"}
-                </small>
+            {messages.map((m) => (
+              <div className={"chat-message " + m.role} key={m.id}>
+                <small>{m.role === "user" ? "Bạn" : "Gia sư NEXUS"}</small>
                 <p>{m.text}</p>
-                {m.source && (
-                  <button
+                {m.sources?.map((s) => (
+                  <a
+                    key={`${s.number}-${s.id}`}
                     className="source-link"
-                    onClick={() => go("lesson", m.source)}
+                    href={`/api/v1/materials/${s.materialId}/source?releaseId=${s.releaseId}`}
+                    target="_blank"
+                    rel="noreferrer"
                   >
-                    Nguồn: {topicById[m.source].lesson}
-                  </button>
-                )}
+                    [{s.number}] {s.title} · trang {s.page}
+                  </a>
+                ))}
               </div>
             ))}
+            {turn && (
+              <>
+                <div className="chat-message user">
+                  <small>Bạn</small>
+                  <p>{turn.text}</p>
+                </div>
+                <div className="chat-message assistant">
+                  <small>Gia sư · đang trả lời</small>
+                  <p>{turn.reply || "Đang tìm tài liệu phù hợp…"}</p>
+                </div>
+              </>
+            )}
           </div>
           <p className="chat-disclaimer">
-            Tra cứu nội dung mẫu trên thiết bị, chưa kết nối AI trực tuyến.
+            Đối chiếu nguồn khi ôn tập. Tối đa 30 lượt mỗi ngày.
           </p>
           <form
             className="chat-composer"
@@ -206,13 +217,14 @@ export function Chat() {
               id="message"
               value={text}
               maxLength={2000}
+              disabled={sending}
               placeholder="Hỏi về kiến thức CNTT…"
               onChange={(e) => setText(e.target.value)}
             />
             <button
               className="primary"
               aria-label="Gửi câu hỏi"
-              disabled={!text.trim()}
+              disabled={sending || !text.trim()}
             >
               <Send size={18} />
             </button>
